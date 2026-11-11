@@ -20,7 +20,7 @@ An authentic, ultra-high-performance desktop client for SoundCloud. Designed wit
 
 ## Downloads & Releases
 
-Download the ready-to-run binaries from the [GitHub Releases page](https://github.com/morcad/soundcloud-client/releases/latest):
+Download the ready-to-run binaries from the [GitHub Releases page](https://github.com/m0rcad/soundcloud-client/releases/latest):
 - **Windows Setup Installer**: `SoundCloud.Desktop.Setup.1.0.0.exe` (Recommended: desktop shortcut, auto-updates)
 - **Windows Portable**: `SoundCloud.Desktop.1.0.0.exe` (Zero installation required, click and play)
 - **macOS & Linux**: Multi-platform automated builds via GitHub Actions workflow (`.dmg`, `.AppImage`, `.deb`)
@@ -108,7 +108,7 @@ Download the ready-to-run binaries from the [GitHub Releases page](https://githu
 ### Installation
 
 ```bash
-git clone https://github.com/morcad/soundcloud-client.git
+git clone https://github.com/m0rcad/soundcloud-client.git
 cd soundcloud-client
 npm install
 ```

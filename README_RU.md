@@ -20,7 +20,7 @@
 
 ## 🚀 Скачать (Релизы)
 
-Готовые файлы для установки и запуска доступны на странице [GitHub Releases](https://github.com/morcad/soundcloud-client/releases/latest):
+Готовые файлы для установки и запуска доступны на странице [GitHub Releases](https://github.com/m0rcad/soundcloud-client/releases/latest):
 - **Установщик Windows (Рекомендуется)**: `SoundCloud.Desktop.Setup.1.0.0.exe` (Автоматическая установка, создание ярлыков на рабочем столе и в меню «Пуск»)
 - **Портативная версия Windows**: `SoundCloud.Desktop.1.0.0.exe` (Запуск в один клик без установки)
 - **macOS и Linux**: Автоматическая мультиплатформенная сборка через GitHub Actions (`.dmg`, `.AppImage`, `.deb`)
@@ -125,7 +125,7 @@
 ### Установка
 
 ```bash
-git clone https://github.com/morcad/soundcloud-client.git
+git clone https://github.com/m0rcad/soundcloud-client.git
 cd soundcloud-client
 npm install
 ```
