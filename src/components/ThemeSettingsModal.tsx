@@ -1,0 +1,1376 @@
+import { useState, useEffect, useMemo } from 'react';
+import { themeService, THEME_PRESETS, BACKGROUND_PRESETS, CustomBackground } from '@/services/theme';
+import { ALL_WALLPAPERS, WallpaperItem } from '@/data/wallpapers';
+import { pinterestService, PinterestWallpaperItem, AESTHETIC_SEARCH_TAGS } from '@/services/pinterest';
+import { X, Palette, Image as ImageIcon, Video, Check, Upload, Sliders, Sparkles, Shield, Globe, CheckCircle2, RefreshCw, Search, Film, Languages, Compass, Link2, ExternalLink, Loader2, MonitorPlay } from 'lucide-react';
+import { useI18n } from '@/services/i18n';
+
+interface ThemeSettingsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function ThemeSettingsModal({ isOpen, onClose }: ThemeSettingsModalProps) {
+  const { lang, t, setLanguage } = useI18n();
+  const [activeTab, setActiveTab] = useState<'language' | 'themes' | 'background' | 'network' | 'overlay'>('themes');
+  const [currentTheme, setCurrentTheme] = useState(themeService.getTheme());
+  const [bgConfig, setBgConfig] = useState<CustomBackground>(themeService.getBackground());
+  const [customUrl, setCustomUrl] = useState(bgConfig.url || '');
+  const [proxyInput, setProxyInput] = useState('');
+  const [activeProxy, setActiveProxy] = useState('');
+  const [proxyStatus, setProxyStatus] = useState<string | null>(null);
+  const [detectedProxy, setDetectedProxy] = useState<{ proxy: string; name: string } | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [dohEnabled, setDohEnabled] = useState(true);
+  const [dohRestartRequired, setDohRestartRequired] = useState(false);
+  const [builtinProxyEnabled, setBuiltinProxyEnabled] = useState(false);
+  const [builtinProxyPort, setBuiltinProxyPort] = useState(8899);
+  const [builtinProxyStatus, setBuiltinProxyStatus] = useState<string | null>(null);
+  const [wallpaperFilter, setWallpaperFilter] = useState<'all' | 'live' | 'static'>('all');
+  const [wallpaperGenre, setWallpaperGenre] = useState<string>('All');
+  const [wallpaperSearch, setWallpaperSearch] = useState('');
+  const [hoveredVideoId, setHoveredVideoId] = useState<string | null>(null);
+
+  // Pinterest Tab & Search State
+  const [bgSubTab, setBgSubTab] = useState<'curated' | 'pinterest'>('curated');
+  const [pinterestQuery, setPinterestQuery] = useState('');
+  const [pinterestAnimated, setPinterestAnimated] = useState(false);
+  const [pinterestResults, setPinterestResults] = useState<PinterestWallpaperItem[]>([]);
+  const [pinterestLoading, setPinterestLoading] = useState(false);
+  const [pinterestError, setPinterestError] = useState<string | null>(null);
+  const [pinLinkInput, setPinLinkInput] = useState('');
+  const [pinLinkResolving, setPinLinkResolving] = useState(false);
+  const [pinLinkStatus, setPinLinkStatus] = useState<{ success: boolean; msg: string } | null>(null);
+
+  const filteredWallpapers = useMemo(() => {
+    return ALL_WALLPAPERS.filter((w) => {
+      const isLive = w.type === 'video' || /\.(gif|mp4|webm)(\?.*)?$/i.test(w.url);
+      if (wallpaperFilter === 'live' && !isLive) return false;
+      if (wallpaperFilter === 'static' && isLive) return false;
+      if (wallpaperGenre !== 'All' && w.category !== wallpaperGenre) return false;
+      if (wallpaperSearch.trim()) {
+        const q = wallpaperSearch.toLowerCase();
+        return w.name.toLowerCase().includes(q) || w.category.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [wallpaperFilter, wallpaperGenre, wallpaperSearch]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('sc_proxy_rule');
+    if (saved) {
+      setProxyInput(saved);
+      setActiveProxy(saved);
+    }
+  }, []);
+  useEffect(() => {
+    if (!isOpen) return;
+    if (window.electronAPI?.getNetworkSettings) {
+      window.electronAPI.getNetworkSettings().then((st: any) => {
+        if (st) {
+          setDohEnabled(st.dohEnabled !== false);
+          setBuiltinProxyEnabled(!!st.builtinProxyEnabled);
+          if (st.builtinProxyPort) setBuiltinProxyPort(st.builtinProxyPort);
+        }
+      }).catch(() => {});
+    }
+    if (window.electronAPI?.builtinProxyStatus) {
+      window.electronAPI.builtinProxyStatus().then((st: any) => {
+        if (st) {
+          setBuiltinProxyEnabled(!!st.running);
+          if (st.port) setBuiltinProxyPort(st.port);
+        }
+      }).catch(() => {});
+    }
+  }, [isOpen]);
+
+  const handleDetectProxy = async () => {
+    if (window.electronAPI?.detectLocalProxy) {
+      setDetecting(true);
+      try {
+        const res = await window.electronAPI.detectLocalProxy();
+        if (res && res.success && res.proxy) {
+          setDetectedProxy({ proxy: res.proxy, name: res.name || 'Local Proxy' });
+        } else {
+          setDetectedProxy(null);
+        }
+      } catch {
+        setDetectedProxy(null);
+      } finally {
+        setDetecting(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      handleDetectProxy();
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSelectTheme = (themeId: string) => {
+    themeService.setTheme(themeId);
+    setCurrentTheme(themeService.getTheme());
+  };
+
+  const handleApplyBackground = (newBg: CustomBackground) => {
+    setBgConfig(newBg);
+    themeService.setBackground(newBg);
+  };
+
+  const handleNativeFileSelect = async () => {
+    if (window.electronAPI?.selectBackgroundFile) {
+      try {
+        const result = await window.electronAPI.selectBackgroundFile();
+        if (result && result.url) {
+          const updated: CustomBackground = {
+            ...bgConfig,
+            type: result.type,
+            url: result.url,
+          };
+          setCustomUrl(result.url);
+          handleApplyBackground(updated);
+        }
+      } catch (err) {
+        console.error('Failed to select local background file:', err);
+      }
+    }
+  };
+
+  const handleBrowserFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const isVideo = file.type.startsWith('video') || /\.(mp4|webm|m4v|mov|mkv)$/i.test(file.name);
+      const objectUrl = URL.createObjectURL(file);
+      const updated: CustomBackground = {
+        ...bgConfig,
+        type: isVideo ? 'video' : 'image',
+        url: objectUrl,
+      };
+      setCustomUrl(objectUrl);
+      handleApplyBackground(updated);
+    }
+  };
+
+  const handleUrlApply = () => {
+    const raw = customUrl.trim();
+    if (!raw) return;
+    let finalUrl = raw;
+    if (/^[a-zA-Z]:[\\/]/.test(raw)) {
+      finalUrl = `local-media://asset/${raw.replace(/\\/g, '/')}`;
+    } else if (raw.startsWith('file:///')) {
+      const pathPart = raw.replace(/^file:\/\/\//, '');
+      finalUrl = `local-media://asset/${pathPart}`;
+    } else if (raw.startsWith('local-media://') && !raw.startsWith('local-media://asset/')) {
+      const pathPart = raw.replace(/^local-media:\/*/, '');
+      finalUrl = `local-media://asset/${pathPart}`;
+    }
+
+    const isVideo =
+      /\.(mp4|webm|m4v|mov|mkv)(\?.*)?$/i.test(raw) ||
+      /\.(mp4|webm|m4v|mov|mkv)(\?.*)?$/i.test(finalUrl);
+
+    const updated: CustomBackground = {
+      ...bgConfig,
+      type: isVideo ? 'video' : 'image',
+      url: finalUrl,
+    };
+    handleApplyBackground(updated);
+  };
+
+  const handleRemoveBackground = () => {
+    const cleared: CustomBackground = {
+      type: 'none',
+      url: '',
+      opacity: 50,
+      blur: 0,
+    };
+    setCustomUrl('');
+    handleApplyBackground(cleared);
+  };
+
+  const handleSearchPinterest = async (forcedQuery?: string, forcedAnimated?: boolean) => {
+    const query = (forcedQuery !== undefined ? forcedQuery : pinterestQuery).trim();
+    const isAnim = forcedAnimated !== undefined ? forcedAnimated : pinterestAnimated;
+    if (!query) return;
+    
+    setPinterestLoading(true);
+    setPinterestError(null);
+    try {
+      const results = await pinterestService.search(query, isAnim);
+      setPinterestResults(results);
+      if (results.length === 0) {
+        setPinterestError('Ничего не найдено по данному запросу. Попробуйте другой тег.');
+      }
+    } catch (err: any) {
+      setPinterestError(err.message || 'Ошибка поиска в Pinterest');
+    } finally {
+      setPinterestLoading(false);
+    }
+  };
+
+  const handleResolvePinUrl = async () => {
+    const raw = pinLinkInput.trim();
+    if (!raw) return;
+
+    setPinLinkResolving(true);
+    setPinLinkStatus(null);
+    try {
+      const res = await pinterestService.resolveUrl(raw);
+      if (res.success && res.url) {
+        const isVideo = res.type === 'video';
+        const updated: CustomBackground = {
+          ...bgConfig,
+          type: isVideo ? 'video' : 'image',
+          url: res.url,
+        };
+        setCustomUrl(res.url);
+        handleApplyBackground(updated);
+        setPinLinkStatus({
+          success: true,
+          msg: isVideo ? 'Оригинал видео (MP4) успешно применен как живой фон!' : 'Оригинал высокого разрешения (4K) установлен как фон!',
+        });
+        setPinLinkInput('');
+      } else {
+        setPinLinkStatus({
+          success: false,
+          msg: res.error || 'Не удалось извлечь оригинальный файл из ссылки Pinterest.',
+        });
+      }
+    } catch (err: any) {
+      setPinLinkStatus({
+        success: false,
+        msg: err.message || 'Сбой обработки ссылки Pinterest.',
+      });
+    } finally {
+      setPinLinkResolving(false);
+      setTimeout(() => setPinLinkStatus(null), 5000);
+    }
+  };
+
+  const handleApplyProxy = async (proxyRule: string) => {
+    const clean = proxyRule.trim();
+    if (window.electronAPI?.setProxy) {
+      await window.electronAPI.setProxy(clean || null);
+    }
+    setActiveProxy(clean);
+    if (clean) {
+      localStorage.setItem('sc_proxy_rule', clean);
+      setProxyStatus('Proxy applied successfully!');
+    } else {
+      localStorage.removeItem('sc_proxy_rule');
+      setProxyStatus('Direct mode activated (Proxy disabled).');
+    }
+    setTimeout(() => setProxyStatus(null), 3000);
+  };
+
+  const handleDohToggle = async (enabled: boolean) => {
+    setDohEnabled(enabled);
+    if (window.electronAPI?.setDoh) {
+      await window.electronAPI.setDoh(enabled);
+    }
+    setDohRestartRequired(true);
+  };
+
+  const handleBuiltinProxyToggle = async () => {
+    if (builtinProxyEnabled) {
+      if (window.electronAPI?.builtinProxyStop) {
+        await window.electronAPI.builtinProxyStop();
+      }
+      setBuiltinProxyEnabled(false);
+      setBuiltinProxyStatus('Встроенный прокси остановлен.');
+    } else {
+      const port = Number(builtinProxyPort) || 8899;
+      const res = await window.electronAPI?.builtinProxyStart?.(port);
+      if (res?.success) {
+        setBuiltinProxyEnabled(true);
+        if (res.port) setBuiltinProxyPort(res.port);
+        setBuiltinProxyStatus('Встроенный прокси запущен: http://127.0.0.1:' + res.port);
+      } else {
+        setBuiltinProxyStatus(res?.error || 'Не удалось запустить встроенный прокси.');
+      }
+    }
+    setTimeout(() => setBuiltinProxyStatus(null), 4000);
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 select-none"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-3xl h-[680px] flex flex-col rounded-sc-card border border-sc-border bg-[#141417] shadow-2xl overflow-hidden"
+      >
+        <div className="flex items-center justify-between border-b border-sc-border px-6 py-3.5 bg-[#18181d]">
+          <div className="flex items-center gap-2.5">
+            <Palette className="text-sc-accent" size={20} />
+            <div>
+              <h2 className="text-sm font-bold text-white">{t('appearanceAndNetwork')}</h2>
+              <p className="text-[11px] text-sc-text-secondary">{t('appearanceSubtitle')}</p>
+            </div>
+          </div>
+
+          <button onClick={onClose} className="text-sc-text-secondary hover:text-white transition-colors p-1 rounded-full hover:bg-white/5">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 p-3 bg-[#18181d] border-b border-sc-border">
+          <button
+            onClick={() => setActiveTab('language')}
+            className={`py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 rounded-sc border transition-all ${
+              activeTab === 'language'
+                ? 'bg-sc-surface-2 border-sc-border-strong text-white shadow-sm ring-1 ring-white/10'
+                : 'bg-sc-surface-2/40 border-sc-border/60 text-sc-text-secondary hover:text-white hover:bg-sc-surface-2'
+            }`}
+          >
+            <Languages size={14} className={activeTab === 'language' ? 'text-sc-accent' : 'text-sc-text-tertiary'} />
+            <span className="truncate">Язык ({lang.toUpperCase()})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('themes')}
+            className={`py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 rounded-sc border transition-all ${
+              activeTab === 'themes'
+                ? 'bg-sc-surface-2 border-sc-border-strong text-white shadow-sm ring-1 ring-white/10'
+                : 'bg-sc-surface-2/40 border-sc-border/60 text-sc-text-secondary hover:text-white hover:bg-sc-surface-2'
+            }`}
+          >
+            <Palette size={14} className={activeTab === 'themes' ? 'text-sc-accent' : 'text-sc-text-tertiary'} />
+            <span className="truncate">{t('themes')}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('background')}
+            className={`py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 rounded-sc border transition-all ${
+              activeTab === 'background'
+                ? 'bg-sc-surface-2 border-sc-border-strong text-white shadow-sm ring-1 ring-white/10'
+                : 'bg-sc-surface-2/40 border-sc-border/60 text-sc-text-secondary hover:text-white hover:bg-sc-surface-2'
+            }`}
+          >
+            <ImageIcon size={14} className={activeTab === 'background' ? 'text-sc-accent' : 'text-sc-text-tertiary'} />
+            <span className="truncate">{t('customBackground')}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('overlay')}
+            className={`py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 rounded-sc border transition-all ${
+              activeTab === 'overlay'
+                ? 'bg-sc-surface-2 border-sc-border-strong text-white shadow-sm ring-1 ring-white/10'
+                : 'bg-sc-surface-2/40 border-sc-border/60 text-sc-text-secondary hover:text-white hover:bg-sc-surface-2'
+            }`}
+          >
+            <MonitorPlay size={14} className={activeTab === 'overlay' ? 'text-sc-accent' : 'text-sc-text-tertiary'} />
+            <span className="truncate">Оверлей</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('network')}
+            className={`py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 rounded-sc border transition-all ${
+              activeTab === 'network'
+                ? 'bg-sc-surface-2 border-sc-border-strong text-white shadow-sm ring-1 ring-white/10'
+                : 'bg-sc-surface-2/40 border-sc-border/60 text-sc-text-secondary hover:text-white hover:bg-sc-surface-2'
+            }`}
+          >
+            <Globe size={14} className={activeTab === 'network' ? 'text-sc-accent' : 'text-sc-text-tertiary'} />
+            <span className="truncate">{t('proxyAndNetwork')}</span>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {activeTab === 'language' ? (
+            <div className="flex flex-col gap-4 max-w-xl mx-auto py-4">
+              <div>
+                <h3 className="text-sm font-bold text-white mb-1">{t('chooseLanguage')}</h3>
+                <p className="text-xs text-sc-text-secondary">
+                  {lang === 'ru'
+                    ? 'Мгновенное переключение языка интерфейса приложения и оверлея'
+                    : 'Instant switching of application and desktop overlay language'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Russian */}
+                <div
+                  onClick={() => setLanguage('ru')}
+                  className={`cursor-pointer rounded-sc border p-4 transition-all flex flex-col justify-between ${
+                    lang === 'ru'
+                      ? 'border-sc-accent bg-sc-accent/10 shadow-lg shadow-sc-accent/20'
+                      : 'border-sc-border bg-sc-surface-elevated hover:border-sc-accent/60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl">🇷🇺</span>
+                      <span className="text-sm font-bold text-white">Русский</span>
+                    </div>
+                    {lang === 'ru' && <CheckCircle2 size={18} className="text-sc-accent" />}
+                  </div>
+                  <p className="text-xs text-sc-text-secondary">
+                    Полный русскоязычный интерфейс, локализация плеера и десктопного оверлея
+                  </p>
+                </div>
+
+                {/* English */}
+                <div
+                  onClick={() => setLanguage('en')}
+                  className={`cursor-pointer rounded-sc border p-4 transition-all flex flex-col justify-between ${
+                    lang === 'en'
+                      ? 'border-sc-accent bg-sc-accent/10 shadow-lg shadow-sc-accent/20'
+                      : 'border-sc-border bg-sc-surface-elevated hover:border-sc-accent/60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl">🇺🇸</span>
+                      <span className="text-sm font-bold text-white">English</span>
+                    </div>
+                    {lang === 'en' && <CheckCircle2 size={18} className="text-sc-accent" />}
+                  </div>
+                  <p className="text-xs text-sc-text-secondary">
+                    Authentic English interface, localized playback controls and floating island HUD
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'themes' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {THEME_PRESETS.map((t) => {
+                const isSelected = currentTheme.id === t.id;
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => handleSelectTheme(t.id)}
+                    className={`cursor-pointer rounded-sc-card border p-3.5 transition-all active:scale-[0.98] ${
+                      isSelected
+                        ? 'border-sc-border-strong bg-[#1f1f26] ring-1 ring-white/20'
+                        : 'border-sc-border bg-[#18181e] hover:bg-[#1f1f26] hover:border-sc-border-strong'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span
+                          className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm border border-white/20"
+                          style={{ backgroundColor: t.colors.accent }}
+                        />
+                        <span className="text-xs font-semibold text-white truncate">
+                          {t.name}
+                        </span>
+                      </div>
+                      {isSelected && (
+                        <span className="w-4 h-4 rounded-full bg-sc-accent text-white flex items-center justify-center shrink-0">
+                          <Check size={10} />
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-sc-text-tertiary block">
+                      {t.category}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : activeTab === 'background' ? (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between pb-3 border-b border-sc-border">
+                <div>
+                  <h4 className="text-sm font-bold text-white">{t('backgroundMedia')}</h4>
+                  <p className="text-xs text-sc-text-secondary mt-0.5">{t('backgroundMediaDesc')}</p>
+                </div>
+                {bgConfig.type !== 'none' && (
+                  <button
+                    onClick={handleRemoveBackground}
+                    className="text-xs text-red-400 hover:text-red-300 font-semibold"
+                  >
+                    {t('resetToDefault')}
+                  </button>
+                )}
+              </div>
+
+              {/* Active Wallpaper Preview Banner */}
+              {bgConfig.type !== 'none' && bgConfig.url && (
+                <div className="rounded-sc border border-sc-border bg-[#161616] p-3 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="relative w-16 h-10 rounded overflow-hidden border border-sc-border shrink-0 bg-black">
+                      {bgConfig.type === 'video' ? (
+                        <video
+                          key={bgConfig.url}
+                          src={
+                            bgConfig.url.startsWith('file:///')
+                              ? `local-media://asset/${bgConfig.url.replace(/^file:\/\/\//, '')}`
+                              : /^[a-zA-Z]:[\\/]/.test(bgConfig.url)
+                              ? `local-media://asset/${bgConfig.url.replace(/\\/g, '/')}`
+                              : bgConfig.url.startsWith('local-media://') && !bgConfig.url.startsWith('local-media://asset/')
+                              ? `local-media://asset/${bgConfig.url.replace(/^local-media:\/*/, '')}`
+                              : bgConfig.url
+                          }
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                          preload="auto"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <img
+                          src={
+                            bgConfig.url.startsWith('file:///')
+                              ? `local-media://asset/${bgConfig.url.replace(/^file:\/\/\//, '')}`
+                              : /^[a-zA-Z]:[\\/]/.test(bgConfig.url)
+                              ? `local-media://asset/${bgConfig.url.replace(/\\/g, '/')}`
+                              : bgConfig.url.startsWith('local-media://') && !bgConfig.url.startsWith('local-media://asset/')
+                              ? `local-media://asset/${bgConfig.url.replace(/^local-media:\/*/, '')}`
+                              : bgConfig.url
+                          }
+                          alt="Current wallpaper"
+                          className="w-full h-full object-cover"
+                        />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white truncate">Active Background</span>
+                        <span className="px-1.5 py-0.5 text-[9px] font-extrabold rounded uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          {bgConfig.type === 'video' ? 'MP4 LIVE' : 'IMAGE'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-sc-text-secondary truncate max-w-sm mt-0.5">
+                        {bgConfig.url}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleRemoveBackground}
+                    className="text-xs text-red-400 hover:text-red-300 font-semibold shrink-0 px-2.5 py-1 rounded hover:bg-red-500/10 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+
+              {/* Sub-tab Navigation: Curated 100 Wallpapers vs Pinterest Search */}
+              <div className="flex items-center gap-2 border-b border-sc-border pb-3">
+                <button
+                  onClick={() => setBgSubTab('curated')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-sc transition-all flex items-center gap-2 ${
+                    bgSubTab === 'curated'
+                      ? 'bg-sc-accent text-white shadow-md shadow-sc-accent/20'
+                      : 'bg-[#181818] border border-sc-border text-sc-text-secondary hover:text-white hover:border-sc-accent/40'
+                  }`}
+                >
+                  <Sparkles size={14} />
+                  <span>{t('pinterestCuratedLibrary')}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setBgSubTab('pinterest');
+                    if (pinterestResults.length === 0) {
+                      handleSearchPinterest('Dark Aesthetic 4k wallpaper');
+                    }
+                  }}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-sc transition-all flex items-center gap-2 ${
+                    bgSubTab === 'pinterest'
+                      ? 'bg-[#E60023] text-white shadow-md shadow-[#E60023]/25'
+                      : 'bg-[#181818] border border-sc-border text-sc-text-secondary hover:text-white hover:border-[#E60023]/50'
+                  }`}
+                >
+                  <Compass size={14} />
+                  <span>{t('pinterestBrowse')}</span>
+                  <span className="text-[9px] uppercase px-1 py-0.2 bg-white/20 rounded font-black">Live API</span>
+                </button>
+              </div>
+
+              {bgSubTab === 'curated' ? (
+                /* Curated Wallpaper Library (100 Wallpapers) */
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-white uppercase tracking-wider">
+                        Wallpaper Library (100 Curated Themes)
+                      </label>
+                      <p className="text-[11px] text-sc-text-secondary mt-0.5">
+                        50 live looped videos &bull; 50 ultra-HD static backgrounds
+                      </p>
+                    </div>
+
+                    {/* Filter Mode: All / Live / Static */}
+                    <div className="flex items-center gap-1 bg-[#1a1a1a] p-1 rounded-sc border border-sc-border self-start sm:self-auto">
+                      <button
+                        onClick={() => setWallpaperFilter('all')}
+                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-sc transition-colors ${
+                          wallpaperFilter === 'all'
+                            ? 'bg-sc-accent text-white shadow-sm'
+                            : 'text-sc-text-secondary hover:text-white'
+                        }`}
+                      >
+                        All (100)
+                      </button>
+                      <button
+                        onClick={() => setWallpaperFilter('live')}
+                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-sc transition-colors flex items-center gap-1 ${
+                          wallpaperFilter === 'live'
+                            ? 'bg-sc-accent text-white shadow-sm'
+                            : 'text-sc-text-secondary hover:text-white'
+                        }`}
+                      >
+                        <Film size={11} />
+                        Live (50)
+                      </button>
+                      <button
+                        onClick={() => setWallpaperFilter('static')}
+                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-sc transition-colors flex items-center gap-1 ${
+                          wallpaperFilter === 'static'
+                            ? 'bg-sc-accent text-white shadow-sm'
+                            : 'text-sc-text-secondary hover:text-white'
+                        }`}
+                      >
+                        <ImageIcon size={11} />
+                        Static (50)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Search & Genre tags */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sc-text-secondary" />
+                      <input
+                        type="text"
+                        value={wallpaperSearch}
+                        onChange={(e) => setWallpaperSearch(e.target.value)}
+                        placeholder="Search wallpapers by title, genre, artist..."
+                        className="w-full rounded-sc border border-sc-border bg-[#161616] py-1.5 pl-8 pr-3 text-xs text-white placeholder:text-sc-text-secondary/60 focus:border-sc-accent focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+                      {['All', 'Cyberpunk', 'Anime & Lo-Fi', 'Synthwave', 'Dark & Minimal', 'Cosmic & Space', 'Nature'].map((g) => (
+                        <button
+                          key={g}
+                          onClick={() => setWallpaperGenre(g)}
+                          className={`px-2.5 py-1 text-[10px] font-bold rounded-sc whitespace-nowrap transition-colors ${
+                            wallpaperGenre === g
+                              ? 'bg-sc-accent text-white'
+                              : 'bg-[#181818] border border-sc-border text-sc-text-secondary hover:text-white hover:border-sc-accent/50'
+                          }`}
+                        >
+                          {g}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Wallpapers Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[360px] overflow-y-auto pr-1">
+                    {filteredWallpapers.map((w) => {
+                      const isSelected = bgConfig.url === w.url;
+                      const isHovered = hoveredVideoId === w.id;
+                      const isVideo = w.type === 'video' || /\.(mp4|webm)(\?.*)?$/i.test(w.url);
+                      const isGif = /\.(gif)(\?.*)?$/i.test(w.url);
+                      const isLive = isVideo || isGif;
+
+                      return (
+                        <div
+                          key={w.id}
+                          onClick={() => handleApplyBackground({ ...bgConfig, type: isVideo ? 'video' : 'image', url: w.url })}
+                          onMouseEnter={() => setHoveredVideoId(w.id)}
+                          onMouseLeave={() => setHoveredVideoId(null)}
+                          className={`group cursor-pointer rounded-sc border overflow-hidden relative aspect-video transition-all hover:scale-[1.02] shadow-md ${
+                            isSelected
+                              ? 'border-sc-accent ring-2 ring-sc-accent shadow-sc-accent/25'
+                              : 'border-sc-border hover:border-sc-accent/60'
+                          }`}
+                        >
+                          <img
+                            src={isGif && isHovered ? w.url : w.thumbnail}
+                            alt={w.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            loading="lazy"
+                          />
+                          {isVideo && isHovered && (
+                            <video
+                              src={w.url}
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                              className="absolute inset-0 w-full h-full object-cover z-0"
+                            />
+                          )}
+
+                          {/* Top Badges */}
+                          <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                            <span
+                              className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded uppercase tracking-wider ${
+                                isLive
+                                  ? 'bg-emerald-500/90 text-white shadow-sm'
+                                  : 'bg-black/70 text-zinc-300 border border-white/10'
+                              }`}
+                            >
+                              {isVideo ? 'MP4 LIVE' : isGif ? 'GIF LIVE' : '4K'}
+                            </span>
+
+                            {isSelected && (
+                              <span className="h-5 w-5 rounded-full bg-sc-accent text-white flex items-center justify-center shadow-md">
+                                <Check size={12} />
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Bottom Overlay Title */}
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2 flex flex-col justify-end pointer-events-none">
+                            <span className="text-[11px] font-bold text-white leading-tight truncate">
+                              {w.name}
+                            </span>
+                            <span className="text-[9px] text-sc-text-secondary/90 truncate mt-0.5">
+                              {w.category} &bull; {w.author || 'Pinterest'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                /* Pinterest Search & Instant Link Resolver */
+                <div className="space-y-4">
+                  {/* Pin Link Direct Import Card */}
+                  <div className="rounded-sc border border-[#E60023]/30 bg-[#E60023]/5 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Link2 size={15} className="text-[#E60023]" />
+                        <span className="text-xs font-bold text-white">Прямой импорт пина с Pinterest</span>
+                      </div>
+                      <span className="text-[10px] text-sc-text-secondary">pin.it / pinterest.com/pin/...</span>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={pinLinkInput}
+                        onChange={(e) => setPinLinkInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleResolvePinUrl();
+                        }}
+                        placeholder="Вставьте ссылку на пин, например: https://pin.it/3xY8abc или https://pinterest.com/pin/..."
+                        className="flex-1 rounded-sc border border-sc-border bg-[#161616] px-3 py-1.5 text-xs text-white placeholder:text-sc-text-secondary/60 focus:border-[#E60023] focus:outline-none"
+                      />
+                      <button
+                        onClick={handleResolvePinUrl}
+                        disabled={pinLinkResolving || !pinLinkInput.trim()}
+                        className="px-3.5 py-1.5 rounded-sc bg-[#E60023] hover:bg-[#ad081b] text-white text-xs font-bold transition-colors flex items-center gap-1.5 disabled:opacity-50 shrink-0 shadow-md shadow-[#E60023]/20"
+                      >
+                        {pinLinkResolving ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" />
+                            <span>{t('pinterestResolving')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={13} />
+                            <span>{t('pinterestResolveAndApply')}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {pinLinkStatus && (
+                      <div
+                        className={`text-[11px] p-2 rounded-sc flex items-center gap-2 ${
+                          pinLinkStatus.success
+                            ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                            : 'bg-red-500/15 border border-red-500/30 text-red-300'
+                        }`}
+                      >
+                        {pinLinkStatus.success ? <CheckCircle2 size={13} /> : <X size={13} />}
+                        <span>{pinLinkStatus.msg}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Pinterest Search Query & Filters */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sc-text-secondary" />
+                        <input
+                          type="text"
+                          value={pinterestQuery}
+                          onChange={(e) => setPinterestQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSearchPinterest();
+                          }}
+                          placeholder={t('pinterestSearchPlaceholder')}
+                          className="w-full rounded-sc border border-sc-border bg-[#161616] py-2 pl-8 pr-3 text-xs text-white placeholder:text-sc-text-secondary/60 focus:border-[#E60023] focus:outline-none"
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const nextAnim = !pinterestAnimated;
+                          setPinterestAnimated(nextAnim);
+                          if (pinterestQuery.trim()) {
+                            handleSearchPinterest(pinterestQuery, nextAnim);
+                          }
+                        }}
+                        className={`px-3 py-2 rounded-sc border text-xs font-bold transition-colors flex items-center gap-1.5 shrink-0 ${
+                          pinterestAnimated
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                            : 'bg-[#181818] border-sc-border text-sc-text-secondary hover:text-white'
+                        }`}
+                        title="Фильтровать только живые/анимированные зацикленные обои"
+                      >
+                        <Film size={13} />
+                        <span>Live / GIF</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleSearchPinterest()}
+                        disabled={pinterestLoading}
+                        className="px-4 py-2 rounded-sc bg-[#E60023] hover:bg-[#ad081b] text-white text-xs font-bold transition-colors flex items-center gap-1.5 disabled:opacity-50 shrink-0 shadow-md shadow-[#E60023]/20"
+                      >
+                        {pinterestLoading ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <Search size={13} />
+                        )}
+                        <span>{t('pinterestSearch')}</span>
+                      </button>
+                    </div>
+
+                    {/* Aesthetic Fast-Tags */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                      {AESTHETIC_SEARCH_TAGS.map((tag) => (
+                        <button
+                          key={tag}
+                          onClick={() => {
+                            setPinterestQuery(tag);
+                            handleSearchPinterest(tag);
+                          }}
+                          className="px-2.5 py-1 text-[10px] font-bold rounded-sc whitespace-nowrap bg-[#181818] border border-sc-border text-sc-text-secondary hover:text-white hover:border-[#E60023]/50 transition-colors"
+                        >
+                          #{tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Pinterest Search Results Grid */}
+                  {pinterestLoading ? (
+                    <div className="flex flex-col items-center justify-center py-16 gap-3 text-sc-text-secondary">
+                      <Loader2 size={28} className="animate-spin text-[#E60023]" />
+                      <span className="text-xs font-medium">Поиск эстетичных оригиналов с Pinterest...</span>
+                    </div>
+                  ) : pinterestError ? (
+                    <div className="p-4 rounded-sc bg-[#181818] border border-sc-border text-center space-y-1">
+                      <p className="text-xs text-sc-text-secondary">{pinterestError}</p>
+                      <button
+                        onClick={() => handleSearchPinterest('Cyberpunk Neon 4K')}
+                        className="text-xs text-[#E60023] hover:underline font-semibold"
+                      >
+                        Попробовать: #Cyberpunk Neon 4K
+                      </button>
+                    </div>
+                  ) : pinterestResults.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[340px] overflow-y-auto pr-1">
+                      {pinterestResults.map((item) => {
+                        const isSelected = bgConfig.url === item.url;
+                        const isHovered = hoveredVideoId === item.id;
+                        const isVideo = item.type === 'video' || /\.(mp4|webm)(\?.*)?$/i.test(item.url);
+                        const isGif = /\.(gif)(\?.*)?$/i.test(item.url);
+                        const isLive = isVideo || isGif;
+
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() =>
+                              handleApplyBackground({
+                                ...bgConfig,
+                                type: isVideo ? 'video' : 'image',
+                                url: item.url,
+                              })
+                            }
+                            onMouseEnter={() => setHoveredVideoId(item.id)}
+                            onMouseLeave={() => setHoveredVideoId(null)}
+                            className={`group cursor-pointer rounded-sc border overflow-hidden relative aspect-video transition-all hover:scale-[1.02] shadow-md ${
+                              isSelected
+                                ? 'border-[#E60023] ring-2 ring-[#E60023] shadow-[#E60023]/25'
+                                : 'border-sc-border hover:border-[#E60023]/60'
+                            }`}
+                          >
+                            <img
+                              src={isGif && isHovered ? item.url : (item.thumbnail || item.url)}
+                              alt={item.title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              loading="lazy"
+                            />
+                            {isVideo && isHovered && (
+                              <video
+                                src={item.url}
+                                autoPlay
+                                loop
+                                muted
+                                playsInline
+                                className="absolute inset-0 w-full h-full object-cover z-0"
+                              />
+                            )}
+
+                            {/* Top Badge */}
+                            <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                              <span
+                                className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded uppercase tracking-wider ${
+                                  isLive
+                                    ? 'bg-emerald-500/90 text-white shadow-sm'
+                                    : 'bg-black/70 text-zinc-300 border border-white/10'
+                                }`}
+                              >
+                                {isVideo ? 'MP4 LIVE' : isGif ? 'GIF LIVE' : item.width ? `${item.width}x${item.height}` : '4K'}
+                              </span>
+
+                              {isSelected && (
+                                <span className="h-5 w-5 rounded-full bg-[#E60023] text-white flex items-center justify-center shadow-md">
+                                  <Check size={12} />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Bottom Title & Apply Hint */}
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-2 flex flex-col justify-end pointer-events-none">
+                              <span className="text-[11px] font-bold text-white leading-tight truncate">
+                                {item.title}
+                              </span>
+                              <span className="text-[9px] text-[#E60023] font-bold mt-0.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Sparkles size={9} /> {t('pinterestApplyWallpaper')}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center rounded-sc border border-dashed border-sc-border bg-[#141414] space-y-2">
+                      <Compass size={24} className="mx-auto text-sc-text-secondary" />
+                      <p className="text-xs text-sc-text-secondary">
+                        Введите поисковый запрос или выберите эстетичный тег выше для поиска обоев в Pinterest
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <div className="rounded-sc border border-sc-border bg-[#141414] p-4 flex flex-col justify-between">
+                  <div>
+                    <label className="block text-xs font-semibold text-white mb-2 flex items-center gap-1.5">
+                      <Upload size={14} className="text-sc-accent" />
+                      {t('chooseFileFromPc')}
+                    </label>
+                    <p className="text-[11px] text-sc-text-secondary mb-3">
+                      {t('backgroundMediaDesc')}
+                    </p>
+                  </div>
+                  {window.electronAPI?.selectBackgroundFile ? (
+                    <button
+                      onClick={handleNativeFileSelect}
+                      className="w-full rounded-sc bg-sc-accent py-2.5 text-xs font-bold text-white hover:bg-sc-accent-hover transition-colors flex items-center justify-center gap-2 shadow-md shadow-sc-accent/20"
+                    >
+                      <Upload size={14} />
+                      {t('browseFilesPc')}
+                    </button>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center h-20 border border-dashed border-sc-border rounded-sc cursor-pointer hover:border-sc-accent hover:bg-[#1c1c1c] transition-colors">
+                      <ImageIcon size={20} className="text-sc-text-secondary mb-1" />
+                      <span className="text-xs text-sc-text-secondary">{t('chooseFileFromPc')}</span>
+                      <input
+                        type="file"
+                        accept="image/*,video/mp4,video/webm,.gif"
+                        onChange={handleBrowserFileChange}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                </div>
+
+                <div className="rounded-sc border border-sc-border bg-[#141414] p-4 flex flex-col justify-between">
+                  <div>
+                    <label className="block text-xs font-semibold text-white mb-2 flex items-center gap-1.5">
+                      <Video size={14} className="text-sc-accent" />
+                      {t('directLinkUrl')}
+                    </label>
+                    <input
+                      type="text"
+                      value={customUrl}
+                      onChange={(e) => setCustomUrl(e.target.value)}
+                      placeholder="https://example.com/tokyo_rain.gif"
+                      className="w-full rounded-sc border border-sc-border bg-[#1a1a1a] px-3 py-2 text-xs text-white placeholder:text-sc-text-secondary focus:border-sc-accent focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={handleUrlApply}
+                    className="w-full mt-3 rounded-sc border border-sc-border bg-sc-surface py-2 text-xs font-bold text-white hover:bg-sc-hover hover:border-sc-accent transition-colors"
+                  >
+                    {t('applyUrl')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Display Mode & Ambient Enhancements */}
+              <div className="rounded-sc-card border border-sc-border bg-sc-surface p-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-white mb-2 flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-sc-accent" />
+                    Режим масштабирования и четкости (Display Mode)
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleApplyBackground({ ...bgConfig, fit: 'cover' })}
+                      className={`p-2.5 rounded-sc border text-left transition-all ${
+                        (bgConfig.fit || 'cover') === 'cover'
+                          ? 'border-sc-accent bg-sc-accent/15 text-white font-bold ring-1 ring-sc-accent'
+                          : 'border-sc-border bg-sc-surface-2 text-sc-text-secondary hover:text-white'
+                      }`}
+                    >
+                      <span className="block text-xs">Cover (Заполнение)</span>
+                      <span className="block text-[10px] text-sc-text-tertiary mt-0.5">На весь экран</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleApplyBackground({ ...bgConfig, fit: 'contain' })}
+                      className={`p-2.5 rounded-sc border text-left transition-all ${
+                        bgConfig.fit === 'contain'
+                          ? 'border-sc-accent bg-sc-accent/15 text-white font-bold ring-1 ring-sc-accent'
+                          : 'border-sc-border bg-sc-surface-2 text-sc-text-secondary hover:text-white'
+                      }`}
+                    >
+                      <span className="block text-xs">Ambient Glow ✨</span>
+                      <span className="block text-[10px] text-sc-text-tertiary mt-0.5">Без растяжения пикселей</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleApplyBackground({ ...bgConfig, fit: 'center' })}
+                      className={`p-2.5 rounded-sc border text-left transition-all ${
+                        bgConfig.fit === 'center'
+                          ? 'border-sc-accent bg-sc-accent/15 text-white font-bold ring-1 ring-sc-accent'
+                          : 'border-sc-border bg-sc-surface-2 text-sc-text-secondary hover:text-white'
+                      }`}
+                    >
+                      <span className="block text-xs">Center (100% Scale)</span>
+                      <span className="block text-[10px] text-sc-text-tertiary mt-0.5">Оригинальный размер</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-sc-border">
+                  <div>
+                    <span className="text-xs font-semibold text-white block">Мягкая виньетка (Vignette)</span>
+                    <span className="text-[10px] text-sc-text-secondary block">Улучшает читаемость списков и кнопок поверх ярких обоев</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyBackground({ ...bgConfig, vignette: bgConfig.vignette === false ? true : false })}
+                    className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+                      bgConfig.vignette !== false
+                        ? 'bg-sc-accent text-white shadow-sm'
+                        : 'bg-sc-surface-2 text-sc-text-tertiary border border-sc-border'
+                    }`}
+                  >
+                    {bgConfig.vignette !== false ? 'Включена' : 'Выключена'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-sc-card border border-sc-border bg-sc-surface p-4 space-y-4">
+                <div className="flex items-center gap-2 text-xs font-semibold text-white mb-1">
+                  <Sliders size={14} className="text-sc-accent" />
+                  {t('backgroundDimming')} & {t('backgroundBlur')}
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs text-sc-text-secondary mb-1">
+                    <span>{t('backgroundDimming')}</span>
+                    <span>{bgConfig.opacity}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={10}
+                    max={95}
+                    value={bgConfig.opacity}
+                    onChange={(e) => handleApplyBackground({ ...bgConfig, opacity: Number(e.target.value) })}
+                    className="w-full accent-sc-accent h-1.5 bg-sc-surface-2 rounded-full cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs text-sc-text-secondary mb-1">
+                    <span>{t('backgroundBlur')}</span>
+                    <span>{bgConfig.blur}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={30}
+                    value={bgConfig.blur}
+                    onChange={(e) => handleApplyBackground({ ...bgConfig, blur: Number(e.target.value) })}
+                    className="w-full accent-sc-accent h-1.5 bg-sc-surface-2 rounded-full cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'overlay' ? (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between pb-3 border-b border-sc-border">
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <MonitorPlay className="text-sc-accent" size={16} />
+                    Десктопный Оверлей (Desktop Island)
+                  </h4>
+                  <p className="text-xs text-sc-text-secondary mt-0.5">
+                    Компактный плавающий виджет поверх рабочего стола с поддержкой караоке-текста и часов
+                  </p>
+                </div>
+
+                {window.electronAPI?.toggleOverlay && (
+                  <button
+                    onClick={() => window.electronAPI?.toggleOverlay()}
+                    className="flex items-center gap-1.5 rounded-full bg-sc-accent px-4 py-2 text-xs font-bold text-white hover:bg-sc-accent-hover transition-all shadow-md shadow-sc-accent/25"
+                  >
+                    <MonitorPlay size={14} />
+                    <span>Переключить оверлей</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-sc-card border border-sc-border bg-sc-surface p-4 space-y-2">
+                  <span className="text-xs font-bold text-white block">Форма и скругление</span>
+                  <p className="text-[11px] text-sc-text-secondary leading-relaxed">
+                    Поддерживаются стили Pill (овальная форма Dynamic Island) и Squircle (скругленный прямоугольник).
+                  </p>
+                </div>
+
+                <div className="rounded-sc-card border border-sc-border bg-sc-surface p-4 space-y-2">
+                  <span className="text-xs font-bold text-white block">Свободное перемещение и размер</span>
+                  <p className="text-[11px] text-sc-text-secondary leading-relaxed">
+                    Зажмите оверлей в любом месте для перетаскивания. Потяните за боковые края для настройки ширины.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between pb-3 border-b border-sc-border">
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Shield className="text-sc-accent" size={16} />
+                    {t('bypassTitle')}
+                  </h4>
+                  <p className="text-xs text-sc-text-secondary mt-0.5">
+                    {t('bypassSubtitle')}
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleDetectProxy}
+                  disabled={detecting}
+                  className="flex items-center gap-1.5 rounded-sc border border-sc-border bg-sc-surface px-3 py-1.5 text-xs font-semibold text-white hover:border-sc-accent transition-colors disabled:opacity-50"
+                  title="Scan for local running proxy clients"
+                >
+                  <RefreshCw size={13} className={detecting ? 'animate-spin' : ''} />
+                  <span>{detecting ? t('searchingProxy') : t('autoDetect')}</span>
+                </button>
+              </div>
+
+              {detectedProxy && (
+                <div className="rounded-sc border border-emerald-500/40 bg-emerald-950/25 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">
+                          {t('clientDetected')}: {detectedProxy.name}
+                        </span>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-extrabold px-1.5 py-0.5 rounded">
+                          {t('connected')}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-sc-text-secondary font-mono block mt-0.5">
+                        {detectedProxy.proxy}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setProxyInput(detectedProxy.proxy);
+                      handleApplyProxy(detectedProxy.proxy);
+                    }}
+                    className="rounded-sc bg-emerald-500 hover:bg-emerald-400 px-4 py-2 text-xs font-bold text-black transition-colors shrink-0 shadow-md"
+                  >
+                    {t('connectToProxy')}
+                  </button>
+                </div>
+              )}
+
+              <div className="rounded-sc border border-sc-border bg-[#141414] p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${dohEnabled ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+      Встроенный DNS-over-HTTPS (DoH)
+    </span>
+    <button
+      onClick={() => handleDohToggle(!dohEnabled)}
+      className={`px-3 py-1 rounded text-[10px] font-bold transition-colors ${dohEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-500/20 text-gray-300'}`}
+    >
+      {dohEnabled ? 'Включено' : 'Отключено'}
+    </button>
+    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-1.5 py-0.5 rounded">
+                    Активен
+                  </span>
+                </div>
+                <p className="text-[11px] text-sc-text-secondary leading-relaxed">
+                  DoH обходит только подмену DNS со стороны провайдеров. Однако в РФ интернет-провайдеры блокируют также аудиопотоки SoundCloud на уровне сетевых пакетов (DPI по имени в ClientHello). Если DoH работает медленно или треки прерываются, используйте прокси-туннель ниже.
+                </p>
+              </div>
+
+              <div className="rounded-sc border border-sc-border bg-[#141414] p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${builtinProxyEnabled ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+                    Встроенный прокси (Embedded Proxy)
+                  </span>
+                  <button
+                    onClick={handleBuiltinProxyToggle}
+                    className={`px-3 py-1 rounded text-[10px] font-bold transition-colors ${builtinProxyEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-500/20 text-gray-300'}`}
+                  >
+                    {builtinProxyEnabled ? 'Запущен' : 'Остановлен'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-sc-text-secondary leading-relaxed">
+                  Запускает локальный HTTP-прокси внутри приложения. Можно использовать как встроенный прокси для обхода блокировок без внешних программ.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={builtinProxyPort}
+                    onChange={(e) => setBuiltinProxyPort(Number(e.target.value) || 8899)}
+                    className="w-24 rounded-sc border border-sc-border bg-[#1a1a1a] px-2 py-1 text-xs text-white"
+                  />
+                  <span className="text-[11px] text-sc-text-secondary">порт</span>
+                </div>
+                {builtinProxyEnabled && (
+                  <div className="text-[11px] text-emerald-400 font-mono">
+                    http://127.0.0.1:{builtinProxyPort}
+                  </div>
+                )}
+                {builtinProxyStatus && (
+                  <div className="text-[11px] text-emerald-400">{builtinProxyStatus}</div>
+                )}
+                {dohRestartRequired && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-amber-400">Изменение DoH требует перезапуска.</span>
+                    <button onClick={() => window.electronAPI?.relaunchApp?.()} className="text-[11px] px-2 py-1 rounded bg-sc-accent text-white font-bold">Перезапустить</button>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-sc border border-sc-border bg-[#141414] p-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-white mb-1.5">
+                    Встроенный прокси-туннель (SOCKS5 / HTTP)
+                  </label>
+                  <p className="text-[11px] text-sc-text-secondary mb-3">
+                    Трафик маршрутизируется через прокси только для SoundCloud — браузер, игры и мессенджеры работают напрямую без потери скорости.
+                  </p>
+                  <input
+                    type="text"
+                    value={proxyInput}
+                    onChange={(e) => setProxyInput(e.target.value)}
+                    placeholder="http://127.0.0.1:39706 или socks5://127.0.0.1:1080"
+                    className="w-full rounded-sc border border-sc-border bg-[#1a1a1a] px-3.5 py-2 text-xs text-white placeholder:text-sc-text-secondary focus:border-sc-accent focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleApplyProxy(proxyInput)}
+                    className="flex-1 rounded-sc bg-sc-accent py-2 text-xs font-bold text-white hover:bg-sc-accent-hover transition-colors shadow-md"
+                  >
+                    Применить Прокси
+                  </button>
+                  {activeProxy && (
+                    <button
+                      onClick={() => {
+                        setProxyInput('');
+                        handleApplyProxy('');
+                      }}
+                      className="px-4 rounded-sc border border-sc-border bg-sc-surface py-2 text-xs font-bold text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      Отключить
+                    </button>
+                  )}
+                </div>
+
+                {proxyStatus && (
+                  <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium">
+                    <CheckCircle2 size={14} />
+                    <span>{proxyStatus}</span>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-sc-border">
+                  <span className="text-[11px] font-semibold text-sc-text-secondary block mb-2">
+                    Популярные порты клиентов обхода (кликни для быстрой вставки):
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setProxyInput('http://127.0.0.1:39706')}
+                      className="text-[11px] px-2.5 py-1 rounded bg-[#202020] border border-sc-border text-sc-text-secondary hover:text-white hover:border-sc-accent transition-colors font-mono"
+                    >
+                      Clash Verge (39706)
+                    </button>
+                    <button
+                      onClick={() => setProxyInput('socks5://127.0.0.1:1080')}
+                      className="text-[11px] px-2.5 py-1 rounded bg-[#202020] border border-sc-border text-sc-text-secondary hover:text-white hover:border-sc-accent transition-colors font-mono"
+                    >
+                      Zapret / ByeDPI (1080)
+                    </button>
+                    <button
+                      onClick={() => setProxyInput('socks5://127.0.0.1:10808')}
+                      className="text-[11px] px-2.5 py-1 rounded bg-[#202020] border border-sc-border text-sc-text-secondary hover:text-white hover:border-sc-accent transition-colors font-mono"
+                    >
+                      v2rayN / Xray (10808)
+                    </button>
+                    <button
+                      onClick={() => setProxyInput('http://127.0.0.1:7890')}
+                      className="text-[11px] px-2.5 py-1 rounded bg-[#202020] border border-sc-border text-sc-text-secondary hover:text-white hover:border-sc-accent transition-colors font-mono"
+                    >
+                      Clash / Flclash (7890)
+                    </button>
+                    <button
+                      onClick={() => setProxyInput('socks5://127.0.0.1:9050')}
+                      className="text-[11px] px-2.5 py-1 rounded bg-[#202020] border border-sc-border text-sc-text-secondary hover:text-white hover:border-sc-accent transition-colors font-mono"
+                    >
+                      Tor (9050)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

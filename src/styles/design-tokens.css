@@ -1,0 +1,59 @@
+:root {
+  /* Solid, Comfortable Dark Palette (100% Opaque & Stable) */
+  --sc-bg: #101013;
+  --sc-bg-elevated: #16161a;
+  --sc-surface: #18181d;
+  --sc-surface-2: #212127;
+  --sc-surface-3: #2a2a32;
+  --sc-surface-glass: #18181d;
+
+  /* Interaction States */
+  --sc-hover: #212127;
+  --sc-bg-hover: #212127;
+  --sc-bg-active: #2a2a32;
+
+  /* Clean Subtle Borders (No Neon Halos) */
+  --sc-border: rgba(255, 255, 255, 0.08);
+  --sc-border-subtle: rgba(255, 255, 255, 0.04);
+  --sc-border-strong: rgba(255, 255, 255, 0.14);
+  --sc-border-hover: rgba(255, 255, 255, 0.20);
+
+  /* Primary Brand Accent (SoundCloud Orange default) */
+  --sc-accent: #ff5500;
+  --sc-accent-hover: #ff6a00;
+  --sc-accent-active: #e64d00;
+  --sc-accent-soft: rgba(255, 85, 0, 0.12);
+  --sc-accent-glow: none;
+
+  /* Natural, Clear Typography Hierarchy */
+  --sc-text-primary: #ffffff;
+  --sc-text-secondary: #9ca3af;
+  --sc-text-tertiary: #6b7280;
+  --sc-text-disabled: #4b5563;
+  --sc-text-on-accent: #ffffff;
+
+  /* Waveform Visuals */
+  --sc-wave-active: #ff5500;
+  --sc-wave-inactive: rgba(255, 255, 255, 0.18);
+  --sc-wave-played: #ff5500;
+  --sc-wave-buffered: rgba(255, 255, 255, 0.28);
+
+  /* Status Badges */
+  --sc-success: #10b981;
+  --sc-warning: #f59e0b;
+  --sc-danger: #ef4444;
+  --sc-info: #3b82f6;
+
+  /* Radius Tokens */
+  --sc-radius-xs: 4px;
+  --sc-radius-sm: 6px;
+  --sc-radius-md: 8px;
+  --sc-radius-lg: 12px;
+  --sc-radius-xl: 16px;
+  --sc-radius-full: 9999px;
+
+  /* Layout */
+  --sc-header-height: 56px;
+  --sc-miniplayer-height: 74px;
+  --sc-container-max: 1360px;
+}
